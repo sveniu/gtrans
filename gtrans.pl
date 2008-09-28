@@ -77,233 +77,223 @@ sub dbg {
     4 => "%R",
   );
 
-  print CLIENTCRAP "%W$IRSSI{name} debug($dbgcol{$level}$level%W)>%n \"$msg\"";
+  print CLIENTCRAP "%W$IRSSI{name} " .
+                   "%Bdebug%W($dbgcol{$level}$level%W)>%n $msg";
 }
 
-sub gdetect {
-  my %args = @_;
-  dbg(2, "gdetect(): input %args: " . Dumper(\%args));
-  my $detected = $service->detect(%args);
+sub err {
+  my $msg = shift;
+  print CLIENTCRAP "%W$IRSSI{name} %Rerror%W>%n $msg";
 }
 
-sub gtranslate {
+sub inf {
+  my $msg = shift;
+  print CLIENTCRAP "%W$IRSSI{name} %Ginfo%W>%n $msg";
+}
+
+sub usage {
+  print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n";
+  print CLIENTCRAP "FIXME";
+}
+
+sub wgl_process {
   my %args = @_;
+  dbg(5, "wgl_process(): input %args: " . Dumper(\%args));
+
+  my $result = $args{func}(%args);
+  dbg(4, "wgl_process() wgl_func() output: " . Dumper(\$result));
+
   my $ok = 1;
-  dbg(2, "gtranslate(): input %args: " . Dumper(\%args));
-  my $detected = $service->detect(%args);
-  if ($detected->error) {
-    # FIXME: Error output
-    printf "detect() error: (%s) %s",
-        $detected->code,
-        $detected->message;
-    $ok = 0;
-  }
-  my $translated = $service->translate(%args);
-  if ($translated->error) {
-    printf "detect() error: (%s) %s",
-        $translated->code,
-        $translated->message;
+  if ($result->error) {
+    err(sprintf "wgl_process() wgl_func() code %s: %s",
+        $result->code,
+        $result->message);
     $ok = 0;
   }
 
-  dbg(3, "gdetect() output: " . Dumper(\$detected));
-  dbg(3, "gtranslate() output: " . Dumper(\$translated));
-
-  return (
-    $detected->confidence,
-    $detected->is_reliable,
-    $translated->translation,
-    $translated->language,
-    $ok
-  );
+  return $result;
 }
 
-sub event_privmsg {
-  return unless Irssi::settings_get_bool("gtrans_input_auto");
-
-  # $data = "nick/#channel :text"
-  my ($server, $data, $nick, $address) = @_;
-  my ($target, $text) = split(/ :/, $data, 2);
-  return if $server->{nick} eq $nick;
-
-  dbg(2, "event_privmsg() input \$text: $text");
-
-  utf8::decode($text);
-  my %args = (
-    "text" => $text,
-    "dest" => (split(/ /,
-        Irssi::settings_get_str("gtrans_my_lang")))[0]
-  );
-
-  my (
-      $confidence,
-      $reliable,
-      $translation,
-      $language,
-      $ok) = gtranslate(%args);
-  utf8::decode($translation);
-
-  my $translation_needed = 1;
-  foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
-    if($language eq $_) {
-      $translation_needed = 0;
-    }
-  }
-
-  if ($ok and $translation_needed) {
-    $text = sprintf "[%s:%.2f] %s",
-        $language,
-        $confidence,
-        $translation;
-
-    $data = join(" :", $target, $text);
-
-    dbg(1, sprintf "event_privmsg() translated from " .
-                   "%%B$language%%n with confidence " .
-                   "%s$confidence%%n", $reliable ? "%G" : "%Y");
-  }
-
-  Irssi::signal_continue($server, $data, $nick, $address);
-}
-
-sub event_send {
-  return unless (
-      Irssi::settings_get_int("gtrans_output_auto") >= 0 and
-      Irssi::settings_get_int("gtrans_output_auto") < 3);
-
-  my ($text, $server, $witem) = @_;
-
-  dbg(2, "event_send() input \$text: $text");
-
-  my $dest_lang;
-
-  if (Irssi::settings_get_int("gtrans_output_auto") eq 1) {
-    # Semiauto translation. Here we preprocess the text to determine
-    # destination language. The W:G:L API cannot fetch the list of
-    # valid languages, so we simply try to see if the language is
-    # valid.
-    if ( $text =~ /^([a-z]{2}(-[a-z]{2})?):(.*)/i) {
-      dbg(2, "event_send() dest_lang \"$1\", text \"$3\"");
-      $dest_lang = $1;
-      $text = $3;
-    }
-  }
-  elsif (Irssi::settings_get_int("gtrans_output_auto") eq 2) {
-    # Fully automated translation.
-    $dest_lang = Irssi::settings_get_str("gtrans_output_auto_lang");
-  }
-
-  # FIXME: Verify this!
-  unless ($dest_lang and $text) {
-    # FIXME: Errorrrz
-    print "Empty destination language or text";
-    Irssi::signal_continue($text, $server, $witem);
-    return;
-  }
-
-  utf8::decode($text);
-  my %args = (
-    "text" => $text,
-    "dest" => $dest_lang
-  );
-  my (
-      $confidence,
-      $reliable,
-      $translation,
-      $language,
-      $ok) = gtranslate(%args);
-
-  unless ($ok) {
-    print "gtrans DEBUG: Translation failed";
-    Irssi::signal_continue($text, $server, $witem);
-    return;
-  }
-
-  if ($language ne $dest_lang) {
-    $text = sprintf "(%s:%.2f) %s",
-        #$reliable ? "good" : "bad",
-        $language,
-        $confidence,
-        $translation;
-    $text = $translation;
-    utf8::decode($text);
-    # FIXME: Informative
-    printf "Translation confidence: %.2f", $confidence;
-  }
-
-  Irssi::signal_continue($text, $server, $witem);
-}
+### sub event_privmsg {
+###   return unless Irssi::settings_get_bool("gtrans_input_auto");
+### 
+###   # $data = "nick/#channel :text"
+###   my ($server, $data, $nick, $address) = @_;
+###   my ($target, $text) = split(/ :/, $data, 2);
+###   return if $server->{nick} eq $nick;
+### 
+###   dbg(2, "event_privmsg() input \$text: $text");
+### 
+###   utf8::decode($text);
+###   my %args = (
+###     "text" => $text,
+###     "dest" => (split(/ /,
+###         Irssi::settings_get_str("gtrans_my_lang")))[0]
+###   );
+### 
+###   my (
+###       $confidence,
+###       $reliable,
+###       $translation,
+###       $language,
+###       $ok) = wgl_translate(%args);
+###   utf8::decode($translation);
+### 
+###   my $translation_needed = 1;
+###   foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
+###     if($language eq $_) {
+###       $translation_needed = 0;
+###     }
+###   }
+### 
+###   if ($ok and $translation_needed) {
+###     $text = sprintf "[%s:%.2f] %s",
+###         $language,
+###         $confidence,
+###         $translation;
+### 
+###     $data = join(" :", $target, $text);
+### 
+###     dbg(1, sprintf "event_privmsg() translated from " .
+###                    "%%B$language%%n with confidence " .
+###                    "%s$confidence%%n", $reliable ? "%G" : "%Y");
+###   }
+### 
+###   Irssi::signal_continue($server, $data, $nick, $address);
+### }
+### 
+### sub event_send {
+###   return unless (
+###       Irssi::settings_get_int("gtrans_output_auto") >= 0 and
+###       Irssi::settings_get_int("gtrans_output_auto") < 3);
+### 
+###   my ($text, $server, $witem) = @_;
+### 
+###   dbg(2, "event_send() input \$text: $text");
+### 
+###   my $dest_lang;
+### 
+###   if (Irssi::settings_get_int("gtrans_output_auto") eq 1) {
+###     # Semiauto translation. Here we preprocess the text to determine
+###     # destination language. The W:G:L API cannot fetch the list of
+###     # valid languages, so we simply try to see if the language is
+###     # valid.
+###     if ( $text =~ /^([a-z]{2}(-[a-z]{2})?):(.*)/i) {
+###       dbg(2, "event_send() dest_lang \"$1\", text \"$3\"");
+###       $dest_lang = $1;
+###       $text = $3;
+###     }
+###   }
+###   elsif (Irssi::settings_get_int("gtrans_output_auto") eq 2) {
+###     # Fully automated translation.
+###     $dest_lang = Irssi::settings_get_str("gtrans_output_auto_lang");
+###   }
+### 
+###   # FIXME: Verify this!
+###   unless ($dest_lang and $text) {
+###     # FIXME: Errorrrz
+###     print "Empty destination language or text";
+###     Irssi::signal_continue($text, $server, $witem);
+###     return;
+###   }
+### 
+###   utf8::decode($text);
+###   my %args = (
+###     "text" => $text,
+###     "dest" => $dest_lang
+###   );
+###   my (
+###       $confidence,
+###       $reliable,
+###       $translation,
+###       $language,
+###       $ok) = wgl_translate(%args);
+### 
+###   unless ($ok) {
+###     print "gtrans DEBUG: Translation failed";
+###     Irssi::signal_continue($text, $server, $witem);
+###     return;
+###   }
+### 
+###   if ($language ne $dest_lang) {
+###     $text = sprintf "(%s:%.2f) %s",
+###         #$reliable ? "good" : "bad",
+###         $language,
+###         $confidence,
+###         $translation;
+###     $text = $translation;
+###     utf8::decode($text);
+###     # FIXME: Informative
+###     printf "Translation confidence: %.2f", $confidence;
+###   }
+### 
+###   Irssi::signal_continue($text, $server, $witem);
+### }
 
 sub cmd_gtrans {
   my ($text, $server, $witem) = @_;
-  dbg(2, "cmd_gtrans() input: " . Dumper(\@_));
+  dbg(5, "cmd_gtrans() input: " . Dumper(\@_));
 
   if ($text eq "help")
   {
     usage();
+    Irssi::signal_stop();
     return;
   }
 
   my $dest_lang;
 
   return unless ($witem and
-              ($witem->{type} eq "CHANNEL" or
-               $witem->{type} eq "QUERY"));
+                  ($witem->{type} eq "CHANNEL" or
+                   $witem->{type} eq "QUERY"));
 
   if ( $text =~ /^([a-z]{2}):(.*)/i) {
     dbg(2, "cmd_gtrans() dest_lang \"$1\", text \"$2\"");
     $dest_lang = $1;
     $text = $2;
   }
-  else
-  {
-    dbg(2, "cmd_gtrans() unknown dest_lang");
+  else {
+    dbg(2, "cmd_gtrans() syntax error");
   }
 
-  # FIXME: Verify this!
   unless ($dest_lang and $text) {
-    # FIXME: Errorrrz or usage()
-    print "Empty destination language or text";
+    err("Empty destination language or text");
+    usage();
     Irssi::signal_stop();
     return;
   }
 
   utf8::decode($text);
   my %args = (
+    "func" => sub { $service->translate(@_) },
     "text" => $text,
     "dest" => $dest_lang
   );
-  my (
-      $confidence,
-      $reliable,
-      $translation,
-      $language,
-      $ok) = gtranslate(%args);
+  my $result = wgl_process(%args);
 
-  unless ($ok) {
+  dbg(4, "cmd_gtrans() wgl_process() output: " . Dumper(\$result));
+
+  if ($result->error) {
     dbg(1, "cmd_gtrans(): Translation failed");
-    print "Translation returned failure code";
+    err(sprintf "Translation failure with code %s: %s",
+        $result->code, $result->message);
     Irssi::signal_stop();
     return;
   }
 
-  if ($language ne $dest_lang) {
-    $text = sprintf "(%s:%.2f) %s",
-        #$reliable ? "good" : "bad",
-        $language,
-        $confidence,
-        $translation;
-    $text = $translation;
+  if ($result->language ne $dest_lang) {
+    $text = $result->translation;
     utf8::decode($text);
-    # FIXME: Informative
-    printf "Translation confidence: %.2f", $confidence;
   }
+
+  dbg("Translation successful");
 
   Irssi::signal_continue($text, $server, $witem);
   $witem->command("MSG $witem->{name} $text");
 }
 
-print CLIENTCRAP "%W$IRSSI{name} loaded. Hints: %n/$IRSSI{commands} help";
+print CLIENTCRAP "%W$IRSSI{name} loaded. " .
+                 "Hints: %n/$IRSSI{commands} help";
 
 Irssi::settings_add_bool("gtrans", "gtrans_input_auto",          1);
 Irssi::settings_add_int ("gtrans", "gtrans_output_auto",         0);
@@ -315,6 +305,6 @@ Irssi::settings_add_int ("gtrans", "gtrans_debug",               0);
 
 Irssi::command_bind("gtrans", "cmd_gtrans");
 
-Irssi::signal_add("event privmsg", "event_privmsg");
-Irssi::signal_add("send text", "event_send");
+### Irssi::signal_add("event privmsg", "event_privmsg");
+### Irssi::signal_add("send text", "event_send");
 
