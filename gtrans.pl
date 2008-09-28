@@ -1,4 +1,9 @@
+#!/usr/bin/env perl -w
 # vim: set sw=2 ts=2 sta et:
+
+# GTrans: Automatic translation in irssi using the Google Language API
+# by Sven Ulland <svensven@gmail.com>
+
 #TODO:
 # what determines the value of isreliable? the api doc doesn't say.
 # fix utf-8 handling.
@@ -29,6 +34,8 @@
 # doc: note that spelling is important
 # signal_add vs signal_add_{first,last} ?
 # link to http://code.google.com/apis/ajaxlanguage/documentation/reference.html#LangNameArray
+# doc: note about fetching and using the WGL module with irssi.
+# what are the sbitems, commands and modules for in %IRSSI?
 
 use strict;
 
@@ -36,8 +43,8 @@ use vars qw($VERSION %IRSSI);
 use Irssi;
 $VERSION = "0.0.0";
 %IRSSI = (
-    authors     => "Svenx",
-    contact     => "svenx\@irc.oftc.net",
+    authors     => "Sven Ulland",
+    contact     => "svensven\@gmail.com",
     name        => "GTrans",
     description => "Automatic translation via the Google Language API",
     license     => "GPLv2",
@@ -48,7 +55,6 @@ $VERSION = "0.0.0";
     commands    => "gtrans"
 );
 
-use lib "/home/sveniu/perl/share/perl/5.8.8";
 use Data::Dumper qw(Dumper);
 use WebService::Google::Language;
 
