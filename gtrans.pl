@@ -10,26 +10,28 @@
 #   + use this:   utf8::decode($text); Some problems?
 #   + note in the doc that only utf-8 is supported
 # DONE: error handling. How to print with activity?
-# colorized? formatting string? how do other scripts do that?
+# DONE: colorized? formatting string? how do other scripts do that?
+#       (no use of mirc colors)
 # DONE: outbound translation: configurable so that you can choose:
 #   + DONE: a default outbound language without any writing overhead
 #   + DONE: choose language in text:   en:jeg liker fisk  (prone to error)
 #   + DONE: a command:   /gtrans en:jeg liker fisk
 # outbound translation status (confidence) should be shown on the following line
 # translate topic? notices, privmsgs, etc?
-# DONE: debugging option
+# debugging option
+#   + DONE: general debugging
+#   + consistent debugging levels. needs testing
 # BIG FAT PRIVACY WARNING: Text is sent through google!
 # DONE: decide to use " or '. Primarily "
 # option to show original text
 # DONE: code reuse (at least partially)
-# handle max len (500 *bytes*). Is actually handlede by the WGL API
-# whitelist function, to specify which sources should be translated:
-#   + whitelist channels
-#   + ^ how about servers/connections? same chan on many servers.
-#   + whitelist nick/user masks
-#   + whitelist all by specifying '*'
-#   + if private message, override '*'
-# hngh, handle signal 'message private' vs 'message public'?
+# handle max len (500 *bytes*). Is actually handled by the WGL API
+# DONE: whitelist function, to specify which sources should be translated:
+#   + DONE: whitelist channels
+#   + WONTFIX: ^ how about servers/connections? same chan on many servers.
+#   + DONE: whitelist nick/user masks
+#   + DONE: whitelist all by specifying '*'
+# DONE: handle signal 'message private' vs 'message public'?
 # DONE: my languages, a list of languages that should not be modified.
 # documentation
 # check how to interact with logging
@@ -120,6 +122,7 @@ sub wgl_process {
 
 sub event_privmsg {
   return unless Irssi::settings_get_bool("gtrans_input_auto");
+  dbg(5, "event_privmsg() input: " . Dumper(\@_));
 
   # $data = "nick/#channel :text"
   my ($server, $data, $nick, $address) = @_;
@@ -128,29 +131,33 @@ sub event_privmsg {
   # Don't translate our own messages.
   return if $server->{nick} eq $nick;
 
-  # Only translate if channel is whitelisted.
-  my $whitelisted_channel = 0;
-  foreach (split(/ /,
-      Irssi::settings_get_str("gtrans_whitelist_channels"))) {
-    $whitelisted_channel = 1 if ($channel eq $_);
+  my $do_translation = 0;
+
+  if ($target eq $server->{nick})
+  {
+    # Target is own nick, so we have a private message.
+    # Check whether the source nick is in the whitelist.
+    foreach (split(/ /,
+        Irssi::settings_get_str("gtrans_whitelist_nicks"))) {
+      $do_translation = 1 if ($nick eq $_);
+      $do_translation = 1 if ($_ eq "*");
+    }
+  } else {
+    # Target is channel, so we have a public message.
+    # Check whether the channel is in the whitelist.
+    foreach (split(/ /,
+        Irssi::settings_get_str("gtrans_whitelist_channels"))) {
+      $do_translation = 1 if ($target eq $_);
+      $do_translation = 1 if ($_ eq "*");
+    }
   }
 
-  # Only translate if user is whitelisted.
-  my $whitelisted_user = 0;
-  foreach (split(/ /,
-      Irssi::settings_get_str("gtrans_whitelist_users"))) {
-    $whitelisted_user = 1 if ($nick eq $_);
-    $whitelisted_user = 1 if ($_ eq "*");
+  unless ($do_translation) {
+    dbg(1, sprintf "Channel/nick \"$target\" is not whitelisted");
+    return;
   }
 
-  dbg(2, sprintf "event_privmsg() whitelisted: " .
-                 "channel %s%%n, user %s%%n",
-                 $whitelisted_channel ? "%Gyes" : "%Rno",
-                 $whitelisted_user ? "%Gyes" : "%Rno");
-
-  return unless ($whitelisted_channel and $whitelisted_user);
-
-  dbg(5, "event_privmsg() input: " . Dumper(\@_));
+  dbg(2, sprintf "event_privmsg() nick/channel is whitelisted");
 
   # Prepare arguments for language detection.
   utf8::decode($text);
@@ -173,18 +180,18 @@ sub event_privmsg {
     return;
   }
 
-  my $translation_needed = 1;
   foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
-    $translation_needed = 0 if($result->language eq $_);
+    $do_translation = 0 if($result->language eq $_);
   }
 
-  unless ($translation_needed) {
-    dbg(2, "Lang matches own lang(s): no translation.");
-    Irssi::signal_continue($server, $data, $nick, $address);
+  unless ($do_translation) {
+    dbg(2, "Incoming language \"$result->language\" matches " .
+           "my lang(s). Not translating.");
+    #Irssi::signal_continue($server, $data, $nick, $address);
     return;
   }
 
-  dbg(1, sprintf "Language detection ok: %s, confidence %.3f",
+  dbg(1, sprintf "Detected language \"%s\", confidence %.3f",
                  $result->language, $result->confidence);
 
   my $confidence = $result->confidence;
@@ -208,7 +215,7 @@ sub event_privmsg {
     dbg(1, "event_privmsg(): Translation failed");
     err(sprintf "Translation failed with code %s: %s",
         $result->code, $result->message);
-    Irssi::signal_continue($server, $data, $nick, $address);
+    #Irssi::signal_continue($server, $data, $nick, $address);
     return;
   }
 
@@ -357,10 +364,9 @@ Irssi::settings_add_str ("gtrans", "gtrans_output_auto_lang",  "fr");
 Irssi::settings_add_str ("gtrans", "gtrans_my_lang",           "en");
 Irssi::settings_add_int ("gtrans", "gtrans_debug",                0);
 Irssi::settings_add_str ("gtrans", "gtrans_whitelist_channels",  "");
-Irssi::settings_add_str ("gtrans", "gtrans_whitelist_users",     "");
+Irssi::settings_add_str ("gtrans", "gtrans_whitelist_nicks",     "");
 
 Irssi::command_bind("gtrans", "cmd_gtrans");
 
 Irssi::signal_add("event privmsg", "event_privmsg");
 Irssi::signal_add("send text", "event_send");
-
