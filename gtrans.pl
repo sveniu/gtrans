@@ -47,7 +47,7 @@
 # doc: note lack of conn/srv differentiation
 # DONE: test command to translate without sending anything over the wire.
 # better code reuse. Lots of duplication now.
-# FIXME: /gtrans fo:bar is overridden by event_output_msg :(
+# DONE: /gtrans fo:bar is overridden by event_output_msg :(
 
 use strict;
 
@@ -76,6 +76,8 @@ my $service = WebService::Google::Language->new(
   "src"     => "",
   "dest"    => "",
 );
+
+my $glob_cmdpass = 0; # Urgh.
 
 sub dbg {
   my ($level, $msg) = @_;
@@ -267,12 +269,20 @@ sub event_output_msg {
   # signal "message irc own_action" parameters:
   # my ($server, $msg, $target) = @_;
 
+  dbg(5, "event_output_msg() args: " . Dumper(\@_));
+  my ($server, $msg, $target, $orig_target) = @_;
+
+  if ($glob_cmdpass) {
+    # Manual translation in gtrans_cmd() command is already done, so
+    # don't do anything more. Yes, it should skip the whitelist, etc.
+    dbg(4, "glob_cmdpass is set, so pass through unaltered");
+    $glob_cmdpass = 0;
+    return;
+  }
+
   return unless (
       Irssi::settings_get_int("gtrans_output_auto") > 0 and
       Irssi::settings_get_int("gtrans_output_auto") <= 2);
-
-  dbg(5, "event_output_msg() args: " . Dumper(\@_));
-  my ($server, $msg, $target, $orig_target) = @_;
 
   # Determine destination language before doing translation.
   my $dest_lang;
@@ -514,6 +524,7 @@ sub cmd_gtrans {
     $witem = Irssi::active_win();
     $witem->print("%GGTrans testing:%n $msg", MSGLEVEL_CLIENTCRAP);
   } else {
+    $glob_cmdpass = 1; # Skip next translation in event_output_msg()
     $witem->command("MSG $witem->{name} $msg");
   }
 }
