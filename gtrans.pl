@@ -27,9 +27,8 @@
 # DONE: code reuse (at least partially)
 # handle max len (500 *bytes*). Is actually handled by the WGL API
 # DONE: whitelist function, to specify which sources should be translated:
-#   + DONE: whitelist channels
+#   + DONE: whitelist channels and nicks
 #   + WONTFIX: ^ how about servers/connections? same chan on many servers.
-#   + DONE: whitelist nick/user masks
 #   + DONE: whitelist all by specifying '*'
 # DONE: handle signal 'message private' vs 'message public'?
 # DONE: my languages, a list of languages that should not be modified.
@@ -41,6 +40,7 @@
 # doc: note about fetching and using the WGL module with irssi.
 # what are the sbitems, commands and modules for in %IRSSI?
 # enable for /me too
+# doc: note lack of conn/srv differentiation
 
 use strict;
 
@@ -98,8 +98,11 @@ sub inf {
 }
 
 sub usage {
-  print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n";
-  print CLIENTCRAP "FIXME";
+  print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
+                   "/$IRSSI{commands} <lang>:<message>";
+  print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
+                   "Example: /$IRSSI{commands} fr:this message " .
+                   "will be translated to french";
 }
 
 sub wgl_process {
@@ -120,74 +123,89 @@ sub wgl_process {
   return $result;
 }
 
-sub event_privmsg {
+sub event_input_msg {
+  # signal "message public" parameters:
+  # my ($server, $msg, $nick, $address, $target) = @_;
+  #
+  # signal "message private" parameters:
+  # my ($server, $msg, $nick, $address) = @_;
+  #
+  # signal "message irc action" parameters:
+  # my ($server, $msg, $nick, $address, $target) = @_;
+
   return unless Irssi::settings_get_bool("gtrans_input_auto");
-  dbg(5, "event_privmsg() input: " . Dumper(\@_));
 
-  # $data = "nick/#channel :text"
-  my ($server, $data, $nick, $address) = @_;
-  my ($target, $text) = split(/ :/, $data, 2);
+  dbg(5, "event_input_msg() args: " . Dumper(\@_));
 
-  # Don't translate our own messages.
-  return if $server->{nick} eq $nick;
+  my ($server, $msg, $nick, $address, $target) = @_;
+
+  my $sig = Irssi::signal_get_emitted();
+  dbg(3, "event_input_msg() signal type: \"$sig\"");
 
   my $do_translation = 0;
 
-  if ($target eq $server->{nick})
-  {
-    # Target is own nick, so we have a private message.
-    # Check whether the source nick is in the whitelist.
+  if ($sig eq "message private" or
+       ($sig eq "message irc action" and
+        $target eq $server->{nick} )) {
+    # Private message.
+    # Check whether the source $nick is in the whitelist.
+    dbg(3, "event_input_msg() Looking for nick \"$nick\" in " .
+           "whitelist");
     foreach (split(/ /,
-        Irssi::settings_get_str("gtrans_whitelist_nicks"))) {
+        Irssi::settings_get_str("gtrans_whitelist"))) {
       $do_translation = 1 if ($nick eq $_);
       $do_translation = 1 if ($_ eq "*");
     }
   } else {
-    # Target is channel, so we have a public message.
-    # Check whether the channel is in the whitelist.
+    # Public message.
+    # Check whether the $target is in the whitelist.
+    dbg(3, "event_input_msg() Looking for channel \"$target\" in " .
+           "whitelist");
     foreach (split(/ /,
-        Irssi::settings_get_str("gtrans_whitelist_channels"))) {
+        Irssi::settings_get_str("gtrans_whitelist"))) {
       $do_translation = 1 if ($target eq $_);
       $do_translation = 1 if ($_ eq "*");
     }
   }
 
   unless ($do_translation) {
-    dbg(1, sprintf "Channel/nick \"$target\" is not whitelisted");
+    dbg(1, sprintf "Channel (\"$target\") or nick (\"$nick\") is " .
+                   "not whitelisted");
     return;
   }
 
-  dbg(2, sprintf "event_privmsg() nick/channel is whitelisted");
+  dbg(2, sprintf "event_input_msg() Channel (\"$target\") or nick " .
+                 "(\"$nick\") is whitelisted");
 
   # Prepare arguments for language detection.
-  utf8::decode($text);
+  utf8::decode($msg);
   my %args = (
     "func" => sub { $service->detect(@_) },
-    "text" => $text,
+    "text" => $msg,
   );
 
   # Run language detection.
   my $result = wgl_process(%args);
 
-  dbg(4, "event_privmsg() wgl_process() detect output: " .
+  dbg(4, "event_input_msg() wgl_process() detect returned: " .
          Dumper(\$result));
 
   if ($result->error) {
-    dbg(1, "event_privmsg(): Language detection failed");
+    dbg(1, "event_input_msg(): Language detection failed");
     err(sprintf "Language detection failed with code %s: %s",
         $result->code, $result->message);
-    Irssi::signal_continue($server, $data, $nick, $address);
     return;
   }
 
+  # Don't translate my languages.
   foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
     $do_translation = 0 if($result->language eq $_);
   }
 
   unless ($do_translation) {
-    dbg(2, "Incoming language \"$result->language\" matches " .
-           "my lang(s). Not translating.");
-    #Irssi::signal_continue($server, $data, $nick, $address);
+    dbg(2, "event_input_msg() Incoming language " .
+           "\"$result->language\" matches my lang(s). " .
+           "Not translating.");
     return;
   }
 
@@ -199,8 +217,7 @@ sub event_privmsg {
   # Prepare arguments for translation.
   my %args = (
     "func" => sub { $service->translate(@_) },
-    "text" => $text,
-    #"src"  => $result->language, # not needed, apparently
+    "text" => $msg,
     "dest" => (split(/ /,
         Irssi::settings_get_str("gtrans_my_lang")))[0]
   );
@@ -208,98 +225,130 @@ sub event_privmsg {
   # Run translation.
   my $result = wgl_process(%args);
 
-  dbg(4, "event_privmsg() wgl_process() translate output: " .
+  dbg(4, "event_privmsg() wgl_process() translate returned: " .
          Dumper(\$result));
 
   if ($result->error) {
     dbg(1, "event_privmsg(): Translation failed");
     err(sprintf "Translation failed with code %s: %s",
         $result->code, $result->message);
-    #Irssi::signal_continue($server, $data, $nick, $address);
     return;
   }
 
-  $text = sprintf "[%s:%.2f] %s",
+  # FIXME: Don't alter messages!
+  $msg = sprintf "[%s:%.2f] %s",
       $result->language, $confidence, $result->translation;
 
-  utf8::decode($text);
-
-  $data = join(" :", $target, $text);
+  utf8::decode($msg);
 
   # FIXME: More info about result?
   dbg(1, "Incoming translation successful");
 
-  Irssi::signal_continue($server, $data, $nick, $address);
+  Irssi::signal_continue($server, $msg, $nick, $address, $target);
 }
 
-sub event_send {
+sub event_output_msg {
+  # signal "message own_public" parameters:
+  # my ($server, $msg, $target) = @_;
+  #
+  # signal "message private" parameters:
+  # my ($server, $msg, $target, $orig_target) = @_;
+  #
+  # signal "message irc own_action" parameters:
+  # my ($server, $msg, $target) = @_;
+
   return unless (
-      Irssi::settings_get_int("gtrans_output_auto") >= 0 and
+      Irssi::settings_get_int("gtrans_output_auto") > 0 and
       Irssi::settings_get_int("gtrans_output_auto") <= 2);
 
-  my ($text, $server, $witem) = @_;
-  dbg(5, "event_send() input: " . Dumper(\@_));
+  dbg(5, "event_output_msg() args: " . Dumper(\@_));
+  my ($server, $msg, $target, $orig_target) = @_;
 
   # Determine destination language before doing translation.
   my $dest_lang;
 
   if (Irssi::settings_get_int("gtrans_output_auto") eq 1) {
-    # Semiauto translation. Here we preprocess the text to determine
+    # Semiauto translation. Here we preprocess the msg to determine
     # destination language. The WGL API cannot fetch the list of valid
     # languages, so we simply try to see if the language is valid.
-    if ( $text =~ /^([a-z]{2}(-[a-z]{2})?):(.*)/i) {
-      dbg(2, "event_send() dest_lang \"$1\", text \"$3\"");
+    if ( $msg =~ /^([a-z]{2}(-[a-z]{2})?):(.*)/i) {
+      dbg(2, "event_output_msg() dest_lang \"$1\", msg \"$3\"");
       $dest_lang = $1;
-      $text = $3;
+      $msg = $3;
     }
   }
   elsif (Irssi::settings_get_int("gtrans_output_auto") eq 2) {
     # Fully automated translation.
+    # To avoid accidents, verify that $target is whitelisted.
+    dbg(3, "event_output_msg() Looking for target \"$target\" in " .
+           "whitelist");
+
+    my $do_translation = 0;
+    foreach (split(/ /,
+        Irssi::settings_get_str("gtrans_whitelist"))) {
+      $do_translation = 1 if ($target eq $_);
+      $do_translation = 1 if ($_ eq "*");
+    }
+
+    unless ($do_translation) {
+      dbg(1, sprintf "Target \"$target\" is not whitelisted");
+      return;
+    }
+
+    dbg(2, sprintf "event_output_msg() Target \"$target\" " .
+                   "is whitelisted");
     $dest_lang = Irssi::settings_get_str("gtrans_output_auto_lang");
   }
 
-  unless ($dest_lang and $text) {
-    err("Empty destination language or text");
-    Irssi::signal_continue($text, $server, $witem);
+  unless ($dest_lang and $msg) {
+    err("Empty destination language or message");
     return;
   }
 
   # Prepare arguments for translation.
-  utf8::decode($text);
+  utf8::decode($msg);
   my %args = (
     "func" => sub { $service->translate(@_) },
-    "text" => $text,
+    "text" => $msg,
     "dest" => $dest_lang
   );
 
   # Run translation.
   my $result = wgl_process(%args);
 
-  dbg(4, "cmd_gtrans() wgl_process() output: " . Dumper(\$result));
+  dbg(4, "event_output_msg() wgl_process() output: " .
+         Dumper(\$result));
 
   if ($result->error) {
-    dbg(1, "cmd_gtrans(): Translation failed");
+    dbg(1, "event_output_msg() Translation failed");
     err(sprintf "Translation failed with code %s: %s",
         $result->code, $result->message);
-    Irssi::signal_continue($text, $server, $witem);
     return;
   }
 
   if ($result->language ne $dest_lang) {
-    $text = $result->translation;
-    utf8::decode($text);
+    $msg = $result->translation;
+    utf8::decode($msg);
   }
 
   dbg(1, "Outbound auto-translation successful");
 
-  Irssi::signal_continue($text, $server, $witem);
+  Irssi::signal_continue($server, $msg, $target, $orig_target);
+}
+
+sub event_topic {
+  # signal "message own_public" parameters:
+  # my ($server, $channel, $topic, $nick, $target) = @_;
+
+  print CLIENTCRAP "event_topic() not implemented. FIXME.";
+  return;
 }
 
 sub cmd_gtrans {
-  my ($text, $server, $witem) = @_;
+  my ($msg, $server, $witem) = @_;
   dbg(5, "cmd_gtrans() input: " . Dumper(\@_));
 
-  if ($text eq "help") {
+  if ($msg =~ /^(|help|-h|--help)$/) {
     usage();
     return;
   }
@@ -311,25 +360,25 @@ sub cmd_gtrans {
   # Determine destination language before doing translation.
   my $dest_lang;
 
-  if ( $text =~ /^([a-z]{2}):(.*)/i) {
-    dbg(2, "cmd_gtrans() dest_lang \"$1\", text \"$2\"");
+  if ( $msg =~ /^([a-z]{2}):(.*)/i) {
+    dbg(2, "cmd_gtrans() dest_lang \"$1\", msg \"$2\"");
     $dest_lang = $1;
-    $text = $2;
+    $msg = $2;
   } else {
     dbg(2, "cmd_gtrans() syntax error");
   }
 
-  unless ($dest_lang and $text) {
-    err("Empty destination language or text");
+  unless ($dest_lang and $msg) {
+    err("Empty destination language or msg");
     usage();
     return;
   }
 
   # Prepare arguments for translation.
-  utf8::decode($text);
+  utf8::decode($msg);
   my %args = (
     "func" => sub { $service->translate(@_) },
-    "text" => $text,
+    "text" => $msg,
     "dest" => $dest_lang
   );
 
@@ -346,27 +395,39 @@ sub cmd_gtrans {
   }
 
   if ($result->language ne $dest_lang) {
-    $text = $result->translation;
-    utf8::decode($text);
+    $msg = $result->translation;
+    utf8::decode($msg);
   }
 
   dbg(1, "Outbound translation successful");
 
-  $witem->command("MSG $witem->{name} $text");
+  $witem->command("MSG $witem->{name} $msg");
 }
 
 print CLIENTCRAP "%W$IRSSI{name} loaded. " .
                  "Hints: %n/$IRSSI{commands} help";
 
-Irssi::settings_add_bool("gtrans", "gtrans_input_auto",           1);
-Irssi::settings_add_int ("gtrans", "gtrans_output_auto",          0);
-Irssi::settings_add_str ("gtrans", "gtrans_output_auto_lang",  "fr");
-Irssi::settings_add_str ("gtrans", "gtrans_my_lang",           "en");
-Irssi::settings_add_int ("gtrans", "gtrans_debug",                0);
-Irssi::settings_add_str ("gtrans", "gtrans_whitelist_channels",  "");
-Irssi::settings_add_str ("gtrans", "gtrans_whitelist_nicks",     "");
+# Register gtrans settings.
+Irssi::settings_add_bool("gtrans", "gtrans_input_auto",          1);
+Irssi::settings_add_int ("gtrans", "gtrans_output_auto",         0);
+Irssi::settings_add_str ("gtrans", "gtrans_output_auto_lang", "fr");
+Irssi::settings_add_str ("gtrans", "gtrans_my_lang",          "en");
+Irssi::settings_add_int ("gtrans", "gtrans_debug",               0);
+Irssi::settings_add_str ("gtrans", "gtrans_whitelist",          "");
+Irssi::settings_add_str ("gtrans", "gtrans_topic_auto",          0);
 
+# Register /gtrans command.
 Irssi::command_bind("gtrans", "cmd_gtrans");
 
-Irssi::signal_add("event privmsg", "event_privmsg");
-Irssi::signal_add("send text", "event_send");
+# Register events for incoming messages/actions.
+Irssi::signal_add("message public",         "event_input_msg");
+Irssi::signal_add("message private",        "event_input_msg");
+Irssi::signal_add("message irc action",     "event_input_msg");
+
+# Register events for outgoing messages/actions.
+Irssi::signal_add("message own_public",     "event_output_msg");
+Irssi::signal_add("message own_private",    "event_output_msg");
+Irssi::signal_add("message irc own_action", "event_output_msg");
+
+# Register events that need special handling.
+Irssi::signal_add("message topic",          "event_topic");
