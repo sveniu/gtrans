@@ -2,7 +2,7 @@
 # vim: set sw=2 ts=2 sta et:
 
 # GTrans: Automatic translation in Irssi using the Google Language API
-# by Sven Ulland <svensven@gmail.com>
+# by Sven Ulland <svensven@gmail.com>. License: GPLv2
 #
 # DOCUMENTATION
 # -------------
@@ -14,7 +14,7 @@
 #   automatic translation engines.
 #
 # Prerequisites:
-#   Better results are achieved if you write properly. No shortcuts!
+#   Better results are achieved if you write properly.
 #
 #   Only UTF-8 text is supported. Make sure your terminal handles it.
 #
@@ -48,16 +48,20 @@
 #   will enable automatic translation for the channel #mychan and nick
 #   'james':
 #
+#     /set gtrans_my_lang en
 #     /set gtrans_input_auto ON
 #     /set gtrans_output_auto 2
+#     /set gtrans_output_auto_lang fi
 #     /set gtrans_whitelist #mychan james
 #
 #   Incoming or outgoing messages on the #mychan channel and queries
-#   from/to james will now be automatically translated.
+#   from/to james will now be automatically translated: Incoming
+#   messages will be translated from any language to English; outgoing
+#   messages will be translated from any language to Finnish.
 #
 # Settings:
 #   The available settings are described below. The default value is
-#   shown in paratheses.
+#   shown in parentheses.
 #
 #   gtrans_input_auto (ON)
 #     ON:  Translate incoming messages that match gtrans_whitelist.
@@ -86,8 +90,9 @@
 #
 #   gtrans_my_lang ("en")
 #     xx:  Space-separated list of languages that should not be
-#          translated. Note: The language will be detected by sending
-#          the message to the Google API.
+#          translated. Incoming messages will be translated to the
+#          first language in this list. Note: The language will be
+#          detected by sending the message to the Google API.
 #
 #   gtrans_debug (0)
 #     0:   No debugging.
@@ -114,10 +119,11 @@
 #   * Translate incoming/outgoing notices.
 #   * Translate incoming/outgoing topics.
 #     + Keep un-/translated topic in topic bar with a toggle.
-#   * Make debugging levels more consistent.
+#   * Make debugging levels and messages more consistent.
 #   * Make whitelist work with servers/connections too.
 #   * Interact better with logging.
 #   * Better code reuse. Lots of duplication now.
+#   * Verify compatibility with other scripts/themes/configurations.
 #
 
 use strict;
