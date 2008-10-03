@@ -3,53 +3,122 @@
 
 # GTrans: Automatic translation in Irssi using the Google Language API
 # by Sven Ulland <svensven@gmail.com>
-
-#TODO:
-# what determines the value of isreliable? the api doc doesn't say.
-# fix utf-8 handling.
-#   + use this:   utf8::decode($text); Some problems with html entities?
-#   + note in the doc that only utf-8 is supported
-# DONE: error handling. How to print with activity?
-# DONE: colorized? formatting string? how do other scripts do that?
-#       (no use of mirc colors)
-# DONE: outbound translation: configurable so that you can choose:
-#   + DONE: a default outbound language without any writing overhead
-#   + DONE: choose language in text:   en:jeg liker fisk  (prone to error)
-#   + DONE: a command:   /gtrans en:jeg liker fisk
-# outbound translation status (confidence) should be shown on the following line
-# DONE: translate notices, privmsgs, etc?
-# translate topic
-#   + translate incoming topic
-#   + translate outgoing topic
-#   + keep translated topic in topic bar with toggle
-# debugging option
-#   + DONE: general debugging
-#   + consistent debugging levels. needs testing
-# BIG FAT PRIVACY WARNING: Text is sent through google!
-# DONE: decide to use " or '. Primarily "
-# DONE: option to show original text
-# DONE: code reuse (at least partially)
-# handle max len (500 *bytes*). Is actually handled by the WGL API
-# DONE: whitelist function, to specify which sources should be translated:
-#   + DONE: whitelist channels and nicks
-#   + WONTFIX: ^ how about servers/connections? same chan on many servers.
-#   + DONE: whitelist all by specifying '*'
-# DONE: handle signal 'message private' vs 'message public'?
-# DONE: my languages, a list of languages that should not be modified.
-# documentation
-# DONE: check how to interact with logging
-# doc: note that spelling is important
-# DONE: signal_add vs signal_add_{first,last} ?
-# link to http://code.google.com/apis/ajaxlanguage/documentation/reference.html#LangNameArray
-# doc: note about fetching and using the WGL module with irssi.
-# what are the sbitems, commands and modules for in %IRSSI?
-# DONE: enable for /me too
-# doc: note lack of conn/srv differentiation
-# DONE: test command to translate without sending anything over the wire.
-# better code reuse. Lots of duplication now.
-# DONE: /gtrans fo:bar is overridden by event_output_msg :(
-# DONE: toggle showing original text or overwriting it. watch out for logging!
-#   + logging is done at the end of the chain :/
+#
+# DOCUMENTATION
+# -------------
+# Introduction:
+#   This script brings the power of the Google Language API to Irssi.
+#   In short, it provides a quick way to translate incoming and
+#   outgoing IRC messages with minimal effort. While the result is
+#   far from professional quality, it is vastly superior to most other
+#   automatic translation engines.
+#
+# Prerequisites:
+#   Better results are achieved if you write properly. No shortcuts!
+#
+#   Only UTF-8 text is supported. Make sure your terminal handles it.
+#
+#   The WebService::Google::Language Perl module is required for the
+#   script to work. It is unlikely that your system provides binary
+#   packages for this module, so you probably have to install it
+#   manually or through the CPAN shell:
+#
+#     $ perl -MCPAN -e "install WebService::Google::Language"
+#
+# Quick testing:
+#   To quickly test the script to see what it can do, you can run the
+#   following command after starting Irssi and loading the script. It
+#   will translate the text and display the result in the current
+#   window. No text will be sent to IRC.
+#
+#     /gtrans --test fi:this is a small test
+#
+#   Another example to translate text and send it to the target
+#   (channel or query) in the currently active window:
+#
+#     /gtrans fi:hello! this is a small test
+#
+# Normal operation:
+#   When loaded with default settings, the script does nothing. The
+#   reason for this is to maintain privacy: It is not a good idea to
+#   submit potentially sensitive information directly to Google.
+#
+#   Automatic translation requires that the channel or nick that sends
+#   or receives the message, is in a whitelist. The following scenario
+#   will enable automatic translation for the channel #mychan and nick
+#   'james':
+#
+#     /set gtrans_input_auto ON
+#     /set gtrans_output_auto 2
+#     /set gtrans_whitelist #mychan james
+#
+#   Incoming or outgoing messages on the #mychan channel and queries
+#   from/to james will now be automatically translated.
+#
+# Settings:
+#   The available settings are described below. The default value is
+#   shown in paratheses.
+#
+#   gtrans_input_auto (ON)
+#     ON:  Translate incoming messages that match gtrans_whitelist.
+#          Translate to the language specified by gtrans_my_lang.
+#     OFF: Don't translate incoming messages.
+#
+#   gtrans_show_orig (ON)
+#     ON:  Show the original, untranslated message, and display the
+#          translation on the next line. Applies to both incoming and
+#          outgoing messages.
+#     OFF: Translate messages transparently, hide original text.
+#
+#   gtrans_output_auto (1)
+#     0:   Don't translate outgoing messages.
+#     1:   Translate outgoing messages only when the text is prefixed
+#          by "<lang>:". Example:  fi:this is a small test. This will
+#          override the whitelist.
+#     2:   Translate outgoing messages automatically to the language
+#          specified by gtrans_output_auto_lang. Target has to match
+#          the whitelist.
+#
+#   gtrans_output_auto_lang ("fi")
+#     xx:  Set automatic output language to "xx". This applies to
+#          automatically translated outgoing messages when
+#          gtrans_output_auto is set to 2.
+#
+#   gtrans_my_lang ("en")
+#     xx:  Space-separated list of languages that should not be
+#          translated. Note: The language will be detected by sending
+#          the message to the Google API.
+#
+#   gtrans_debug (0)
+#     0:   No debugging.
+#     1:   Light debugging. Useful to see what's going on.
+#     2:   Normal debugging. Slightly more verbose.
+#     3:   Medium debugging. Useful for troubleshooting.
+#     4:   Verbose debugging. Significant output.
+#     5:   Very verbose debugging. Lots of output.
+#
+#   gtrans_whitelist ("")
+#     xx:  Space-separated list of channels and nicks that can be
+#          translated. This applies to both incoming and outgoing
+#          messages. Specify "*" to whitelist everything.
+#
+# Links / more info:
+#   List of supported languages in the Google Language API:
+#     <URL:http://code.google.com/apis/ajaxlanguage/documentation/reference.html#LangNameArray>
+#
+#   WebService::Google::Language Perl module at CPAN:
+#     <URL:http://search.cpan.org/~hma/WebService-Google-Language-0.02/lib/WebService/Google/Language.pm>
+#
+# TODO list:
+#   * What determines the value of isreliable? The API doesn't say.
+#   * Translate incoming/outgoing notices.
+#   * Translate incoming/outgoing topics.
+#     + Keep un-/translated topic in topic bar with a toggle.
+#   * Make debugging levels more consistent.
+#   * Make whitelist work with servers/connections too.
+#   * Interact better with logging.
+#   * Better code reuse. Lots of duplication now.
+#
 
 use strict;
 
@@ -60,7 +129,7 @@ $VERSION = "0.0.0";
     authors     => "Sven Ulland",
     contact     => "svensven\@gmail.com",
     name        => "GTrans",
-    description => "Automatic translation via the Google Language API",
+    description => "Translation via the Google Language API",
     license     => "GPLv2",
     url         => "http://scripts.irssi.org/",
     changed     => $VERSION,
@@ -79,9 +148,10 @@ my $service = WebService::Google::Language->new(
   "dest"    => "",
 );
 
-# Urgh. $glob_cmdpass is set to 1 when using gtrans_cmd() and later checked in
-# event_output_msg(). The reason is that event_output_msg() is called
-# twice: first by cmd_gtrans(), then by the event "send text".
+# Urgh. $glob_cmdpass is set to 1 when using gtrans_cmd() and later
+# checked in event_output_msg(). The reason is that event_output_msg()
+# is called twice: first by cmd_gtrans(), then by the event "send
+# text".
 my $glob_cmdpass = 0;
 
 sub dbg {
@@ -114,13 +184,19 @@ sub usage {
   print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
                    "/$IRSSI{commands} [-t|--test] <lang>:<message>";
   print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
-                   "Example: /$IRSSI{commands} fr:this message " .
+                   "Example: %W/$IRSSI{commands} fr:this message " .
                    "will be translated to french and sent to the " .
-                   "currently active window.";
+                   "currently active window.%n";
   print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
-                   "Example: /$IRSSI{commands} -t fi:this message " .
-                   "will be translated to finnish, but *won't* be " .
-                   "sent out. use this to test translations.";
+                   "Example: %W/$IRSSI{commands} -t fi:this " .
+                   "message will be translated to finnish, but " .
+                   "*won't* be sent out. use this to test " .
+                   "translations.%n";
+  print CLIENTCRAP "%W$IRSSI{name} %Yusage%W>%n " .
+                   "There are several settings to modify " .
+                   "translation behaviour. Type %W/set gtrans%n to " .
+                   "see the available settings. See the script " .
+                   "source for documentation.";
 }
 
 sub dehtml {
@@ -173,7 +249,7 @@ sub event_input_msg {
     # Public message.
     $witem = Irssi::window_item_find($target);
 
-    # Check whether the $target is in the whitelist.
+    # Check whether $target is in the whitelist.
     dbg(3, "$subname() Looking for channel \"$target\" " .
            "in whitelist");
     foreach (split(/ /,
@@ -334,7 +410,7 @@ sub event_output_msg {
   }
 
   unless ($dest_lang and $msg) {
-    err("Empty destination language or message");
+    dbg(1, "Empty destination language or message");
     return;
   }
 
@@ -368,7 +444,7 @@ sub event_output_msg {
 
   if($force_lang) {
     # Emit new signal, since we came from cmd_gtrans().
-    $glob_cmdpass = 1;
+    $glob_cmdpass = 1; # Don't translate in event_output_msg()
     dbg(3, "$subname():" . __LINE__ .
            " Emitting \"send text\" signal");
     Irssi::signal_emit("send text", $trmsg, $server, $witem);
@@ -378,7 +454,7 @@ sub event_output_msg {
   Irssi::signal_continue($trmsg, $server, $witem);
 
   if (Irssi::settings_get_bool("gtrans_show_orig")) {
-    my $origmsg = sprintf "(orig:%%B%s%%n) %s",
+    my $origmsg = sprintf "[orig:%%B%s%%n] %s",
         $result->language,
         $msg;
     $witem->print($origmsg, MSGLEVEL_CLIENTCRAP);
@@ -387,105 +463,107 @@ sub event_output_msg {
   dbg(1, "Outbound auto-translation successful");
 }
 
-sub event_topic {
-  # signal "message own_public" parameters:
-  # my ($server, $channel, $topic, $nick, $target) = @_;
-
-  return unless Irssi::settings_get_bool("gtrans_topic_auto");
-
-  dbg(5, "event_topic() args: " . Dumper(\@_));
-
-  my ($server, $channel, $msg, $nick, $target) = @_;
-
-  my $do_translation = 0;
-
-  # Check whether $channel is in the whitelist.
-  dbg(3, "event_topic() Looking for channel \"$channel\" in " .
-         "whitelist");
-  foreach (split(/ /,
-      Irssi::settings_get_str("gtrans_whitelist"))) {
-    $do_translation = 1 if ($channel eq $_);
-    $do_translation = 1 if ($_ eq "*");
-  }
-
-  unless ($do_translation) {
-    dbg(1, sprintf "Channel $channel is not whitelisted. " .
-                   "Not translating topic");
-    return;
-  }
-
-  dbg(2, sprintf "event_topic() Channel $channel is whitelisted");
-
-  # Prepare arguments for language detection.
-  utf8::decode($msg);
-  my %args = (
-    "func" => sub { $service->detect(@_) },
-    "text" => $msg,
-  );
-
-  # Run language detection.
-  my $result = wgl_process(%args);
-
-  dbg(4, "event_topic() wgl_process() detect returned: " .
-         Dumper(\$result));
-
-  if ($result->error) {
-    dbg(1, "event_topic(): Language detection failed");
-    err(sprintf "Language detection failed with code %s: %s",
-        $result->code, $result->message);
-    return;
-  }
-
-  # Don't translate my languages.
-  foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
-    $do_translation = 0 if($result->language eq $_);
-  }
-
-  unless ($do_translation) {
-    dbg(2, "event_topic() Incoming language " .
-           "\"$result->language\" matches my lang(s). " .
-           "Not translating.");
-    return;
-  }
-
-  dbg(1, sprintf "Detected language \"%s\", confidence %.3f",
-                 $result->language, $result->confidence);
-
-  my $confidence = $result->confidence;
-
-  # Prepare arguments for translation.
-  my %args = (
-    "func" => sub { $service->translate(@_) },
-    "text" => $msg,
-    "dest" => (split(/ /,
-        Irssi::settings_get_str("gtrans_my_lang")))[0]
-  );
-
-  # Run translation.
-  my $result = wgl_process(%args);
-
-  dbg(4, "event_topic() wgl_process() translate returned: " .
-         Dumper(\$result));
-
-  if ($result->error) {
-    dbg(1, "Topic translation failed");
-    err(sprintf "Topic translation failed with code %s: %s",
-        $result->code, $result->message);
-    return;
-  }
-
-  # FIXME: Don't alter messages!
-  $msg = sprintf "[%s:%.2f] %s",
-      $result->language, $confidence, $result->translation;
-
-  utf8::decode($msg);
-  dehtml($msg);
-
-  # FIXME: More info about result?
-  dbg(1, "Incoming topic translation successful");
-
-  Irssi::signal_continue($server, $channel, $msg, $nick, $target);
-}
+# FIXME: While topic translation is implemented, it needs more work to
+# be useful. Until it is, the code is not active.
+#sub event_topic {
+#  # signal "message own_public" parameters:
+#  # my ($server, $channel, $topic, $nick, $target) = @_;
+#
+#  return unless Irssi::settings_get_bool("gtrans_topic_auto");
+#
+#  dbg(5, "event_topic() args: " . Dumper(\@_));
+#
+#  my ($server, $channel, $msg, $nick, $target) = @_;
+#
+#  my $do_translation = 0;
+#
+#  # Check whether $channel is in the whitelist.
+#  dbg(3, "event_topic() Looking for channel \"$channel\" in " .
+#         "whitelist");
+#  foreach (split(/ /,
+#      Irssi::settings_get_str("gtrans_whitelist"))) {
+#    $do_translation = 1 if ($channel eq $_);
+#    $do_translation = 1 if ($_ eq "*");
+#  }
+#
+#  unless ($do_translation) {
+#    dbg(1, sprintf "Channel $channel is not whitelisted. " .
+#                   "Not translating topic");
+#    return;
+#  }
+#
+#  dbg(2, sprintf "event_topic() Channel $channel is whitelisted");
+#
+#  # Prepare arguments for language detection.
+#  utf8::decode($msg);
+#  my %args = (
+#    "func" => sub { $service->detect(@_) },
+#    "text" => $msg,
+#  );
+#
+#  # Run language detection.
+#  my $result = wgl_process(%args);
+#
+#  dbg(4, "event_topic() wgl_process() detect returned: " .
+#         Dumper(\$result));
+#
+#  if ($result->error) {
+#    dbg(1, "event_topic(): Language detection failed");
+#    err(sprintf "Language detection failed with code %s: %s",
+#        $result->code, $result->message);
+#    return;
+#  }
+#
+#  # Don't translate my languages.
+#  foreach (split(/ /, Irssi::settings_get_str("gtrans_my_lang"))) {
+#    $do_translation = 0 if($result->language eq $_);
+#  }
+#
+#  unless ($do_translation) {
+#    dbg(2, "event_topic() Incoming language " .
+#           "\"$result->language\" matches my lang(s). " .
+#           "Not translating.");
+#    return;
+#  }
+#
+#  dbg(1, sprintf "Detected language \"%s\", confidence %.3f",
+#                 $result->language, $result->confidence);
+#
+#  my $confidence = $result->confidence;
+#
+#  # Prepare arguments for translation.
+#  my %args = (
+#    "func" => sub { $service->translate(@_) },
+#    "text" => $msg,
+#    "dest" => (split(/ /,
+#        Irssi::settings_get_str("gtrans_my_lang")))[0]
+#  );
+#
+#  # Run translation.
+#  my $result = wgl_process(%args);
+#
+#  dbg(4, "event_topic() wgl_process() translate returned: " .
+#         Dumper(\$result));
+#
+#  if ($result->error) {
+#    dbg(1, "Topic translation failed");
+#    err(sprintf "Topic translation failed with code %s: %s",
+#        $result->code, $result->message);
+#    return;
+#  }
+#
+#  # FIXME: Don't alter messages!
+#  $msg = sprintf "[%s:%.2f] %s",
+#      $result->language, $confidence, $result->translation;
+#
+#  utf8::decode($msg);
+#  dehtml($msg);
+#
+#  # FIXME: More info about result?
+#  dbg(1, "Incoming topic translation successful");
+#
+#  Irssi::signal_continue($server, $channel, $msg, $nick, $target);
+#}
 
 sub cmd_gtrans {
   my $subname = "cmd_gtrans";
@@ -522,7 +600,7 @@ sub cmd_gtrans {
   }
 
   unless ($dest_lang and $msg) {
-    err("Empty destination language or msg");
+    err("Empty destination language or message");
     usage();
     return;
   }
@@ -571,29 +649,27 @@ print CLIENTCRAP "%W$IRSSI{name} loaded. " .
 
 # Register gtrans settings.
 Irssi::settings_add_bool("gtrans", "gtrans_input_auto",          1);
-Irssi::settings_add_bool("gtrans", "gtrans_topic_auto",          0);
+#Irssi::settings_add_bool("gtrans", "gtrans_topic_auto",          0);
 Irssi::settings_add_bool("gtrans", "gtrans_show_orig",           1);
-Irssi::settings_add_int ("gtrans", "gtrans_output_auto",         0);
-Irssi::settings_add_str ("gtrans", "gtrans_output_auto_lang", "fr");
+Irssi::settings_add_int ("gtrans", "gtrans_output_auto",         1);
+Irssi::settings_add_str ("gtrans", "gtrans_output_auto_lang", "fi");
 Irssi::settings_add_str ("gtrans", "gtrans_my_lang",          "en");
 Irssi::settings_add_int ("gtrans", "gtrans_debug",               0);
 Irssi::settings_add_str ("gtrans", "gtrans_whitelist",          "");
 
 # Register /gtrans command.
-Irssi::command_bind("gtrans",                    "cmd_gtrans");
+Irssi::command_bind("gtrans",                         "cmd_gtrans");
 
 # Register events for incoming messages/actions.
 Irssi::signal_add_last("message public",         "event_input_msg");
 Irssi::signal_add_last("message private",        "event_input_msg");
-#TODO: Irssi::signal_add("message irc action",          "event_input_msg");
-#TODO: Irssi::signal_add("message irc notice",          "event_input_msg");
 
 # Register events for outgoing messages/actions.
-#Irssi::signal_add("message own_public",     "event_output_msg");
-#Irssi::signal_add("message own_private",    "event_output_msg");
-#Irssi::signal_add("message irc own_action", "event_output_msg");
-#Irssi::signal_add("message irc own_notice", "event_output_msg");
-Irssi::signal_add("send text", "event_output_msg");
+Irssi::signal_add("send text",                  "event_output_msg");
 
-# Register events that need special handling.
-####Irssi::signal_add("event topic",          "event_topic");
+#TODO: Register events that need special handling.
+#Irssi::signal_add("message irc action",          "event_input_msg");
+#Irssi::signal_add("message irc notice",          "event_input_msg");
+#Irssi::signal_add("message irc own_action",     "event_output_msg");
+#Irssi::signal_add("message irc own_notice",     "event_output_msg");
+#Irssi::signal_add("event topic",                     "event_topic");
